@@ -1,0 +1,106 @@
+@layer theme, base, components, utilities;
+
+/* Telegram-native look: every colour comes from the theme Telegram injects (--tg-theme-*), so light / dark / custom themes
+   just work. Fallbacks are the stock Telegram palette for a plain browser. Sections are rounded grouped cells (like Wallet). */
+@layer base {
+  :root {
+    --bg: var(--tg-theme-secondary-bg-color, #efeff4);
+    --surface: var(--tg-theme-section-bg-color, var(--tg-theme-bg-color, #ffffff));
+    --text: var(--tg-theme-text-color, #000000);
+    --hint: var(--tg-theme-hint-color, #8e8e93);
+    --link: var(--tg-theme-link-color, #2481cc);
+    --accent: var(--tg-theme-button-color, #2481cc);
+    --accent-text: var(--tg-theme-button-text-color, #ffffff);
+    --danger: var(--tg-theme-destructive-text-color, #e5484d);
+    --section-header: var(--tg-theme-section-header-text-color, var(--hint));
+    --separator: var(--tg-theme-section-separator-color, rgba(128, 128, 128, 0.22));
+    --warning-bg: color-mix(in srgb, #f5a623 18%, var(--surface));
+    --danger-bg: color-mix(in srgb, var(--danger) 14%, var(--surface));
+    --radius: 12px;
+    --pad: 16px;
+    --safe-top: var(--tg-content-safe-area-inset-top, 0px);
+    --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-safe-area-inset-bottom, 0px));
+    color-scheme: light dark;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html,
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 400 16px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+
+  button {
+    cursor: pointer;
+    background: none; /* Tailwind's preflight is not imported (the older screens style their own buttons): the few resets the game screens need live here */
+    border: 0;
+    padding: 0;
+  }
+
+  ul,
+  ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  img {
+    display: block;
+  }
+
+  h1,
+  h2,
+  h3,
+  p {
+    margin: 0;
+  }
+
+  .screen {
+    padding: calc(var(--safe-top) + 12px) var(--pad) calc(84px + var(--safe-bottom));
+    max-width: 640px;
+    margin: 0 auto;
+  }
+
+  .screen-title {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    margin: 8px 4px 16px;
+  }
+
+  .muted {
+    color: var(--hint);
+  }
+
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .spacer {
+    flex: 1;
+  }
+
+  .stack > * + * {
+    margin-top: 12px;
+  }
+}

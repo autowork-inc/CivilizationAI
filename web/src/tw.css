@@ -1,0 +1,23 @@
+/* Tailwind CSS v4 for the game screens (Character, Tavern, Dashboard). Only the theme tokens and the utilities are imported - NOT Tailwind's preflight - so the
+   older screens (their own scoped styles and the rules in app.css, which now sit in the "base" layer) look exactly as before. The colours are the Telegram theme
+   variables of app.css, so light / dark / custom Telegram themes keep working: `bg-surface text-ink text-hint`, `text-link`, `bg-accent`, ... */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-ink: var(--text);
+  --color-hint: var(--hint);
+  --color-link: var(--link);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-text);
+  --color-danger: var(--danger);
+  --color-line: var(--separator);
+  /* the four branches of the character (fixed hues: they carry meaning, not theme) */
+  --color-focus: #f59e0b;
+  --color-intellect: #3b82f6;
+  --color-body: #22c55e;
+  --color-connection: #ec4899;
+  --radius-card: 12px;
+}

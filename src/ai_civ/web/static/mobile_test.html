@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mobile API test</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; font: 16px/1.4 system-ui, sans-serif; display: flex; flex-direction: column; height: 100dvh; }
+  header, form, #auth { padding: 10px 16px; }
+  header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #8884; }
+  #log { flex: 1; overflow-y: auto; padding: 8px 16px; }
+  .m { margin: 6px 0; padding: 8px 12px; border-radius: 14px; max-width: 85%; white-space: pre-wrap; }
+  .user { background: #2a7de1; color: #fff; margin-left: auto; }
+  .bot { background: #8883; }
+  .err { background: #d33; color: #fff; }
+  input, button, select { font: inherit; padding: 10px; border-radius: 10px; border: 1px solid #8886; box-sizing: border-box; }
+  button { background: #2a7de1; color: #fff; border: 0; }
+  form { display: flex; gap: 8px; border-top: 1px solid #8884; }
+  form input { flex: 1; }
+  #auth { display: grid; gap: 8px; }
+  small { opacity: .7; }
+</style></head>
+<body>
+<header><b>Mobile API</b><span><small id="who"></small> <button id="out" hidden>Выйти</button></span></header>
+<div id="auth">
+  <input id="email" type="email" placeholder="e-mail" autocomplete="username">
+  <input id="pw" type="password" placeholder="пароль (от 8 знаков)" autocomplete="current-password">
+  <div style="display:flex;gap:8px"><button id="login" style="flex:1">Войти</button><button id="reg" style="flex:1">Регистрация</button></div>
+  <small id="msg"></small>
+</div>
+<div id="log" hidden></div>
+<form id="chat" hidden><input id="text" placeholder="Сообщение" autocomplete="off"><button>→</button></form>
+<script>
+const B = "/api/v1/mobile";
+const $ = (id) => document.getElementById(id);
+let tokens = JSON.parse(localStorage.getItem("tokens") || "null");
+
+function show() {
+  const on = !!tokens;
+  $("auth").hidden = on; $("log").hidden = !on; $("chat").hidden = !on; $("out").hidden = !on;
+  $("who").textContent = on ? "вы вошли" : "";
+}
+function add(cls, text) {
+  const d = document.createElement("div"); d.className = "m " + cls; d.textContent = text;
+  $("log").appendChild(d); $("log").scrollTop = 1e9; return d;
+}
+async function api(path, body, auth) {
+  const r = await fetch(B + path, { method: "POST", headers: { "Content-Type": "application/json", ...(auth ? { Authorization: "Bearer " + tokens.access_token } : {}) }, body: JSON.stringify(body) });
+  return r;
+}
+async function sign(kind) {
+  $("msg").textContent = "…";
+  const r = await api("/auth/" + kind, { email: $("email").value, password: $("pw").value });
+  const j = await r.json();
+  if (!r.ok) { $("msg").textContent = j.error ? j.error.message : r.status; return; }
+  tokens = j; localStorage.setItem("tokens", JSON.stringify(j)); show(); history();
+}
+async function refresh() {
+  const r = await api("/auth/refresh", { refresh_token: tokens.refresh_token });
+  if (!r.ok) { tokens = null; localStorage.removeItem("tokens"); show(); return false; }
+  tokens = await r.json(); localStorage.setItem("tokens", JSON.stringify(tokens)); return true;
+}
+async function authed(path, init) {
+  let r = await fetch(B + path, { ...init, headers: { ...(init.headers || {}), Authorization: "Bearer " + tokens.access_token } });
+  if (r.status === 401 && await refresh()) r = await fetch(B + path, { ...init, headers: { ...(init.headers || {}), Authorization: "Bearer " + tokens.access_token } });
+  return r;
+}
+async function history() {
+  $("log").textContent = "";
+  const r = await authed("/chat/history?limit=30", {});
+  if (r.ok) for (const m of (await r.json()).messages) add(m.role === "user" ? "user" : "bot", m.text);
+}
+$("login").onclick = () => sign("login");
+$("reg").onclick = () => sign("register");
+$("out").onclick = async () => { await api("/auth/logout", { refresh_token: tokens.refresh_token }); tokens = null; localStorage.removeItem("tokens"); show(); };
+$("chat").onsubmit = async (e) => {
+  e.preventDefault();
+  const text = $("text").value.trim(); if (!text) return; $("text").value = "";
+  add("user", text);
+  const bubble = add("bot", "…"); let got = false;
+  const r = await authed("/chat/stream", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ client_message_id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random(), text }) });
+  if (!r.ok) { bubble.className = "m err"; bubble.textContent = (await r.json()).error.message; return; }
+  const reader = r.body.getReader(), dec = new TextDecoder(); let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read(); if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i; while ((i = buf.replace(/\r\n/g, "\n").indexOf("\n\n")) >= 0) {
+      buf = buf.replace(/\r\n/g, "\n"); const block = buf.slice(0, i); buf = buf.slice(i + 2);
+      const ev = (block.match(/^event: (.*)$/m) || [])[1], data = (block.match(/^data: (.*)$/m) || [])[1];
+      if (!ev || !data) continue; const d = JSON.parse(data);
+      if (ev === "token") { if (!got) { bubble.textContent = ""; got = true; } bubble.textContent += d.text; $("log").scrollTop = 1e9; }
+      if (ev === "error") { bubble.className = "m err"; bubble.textContent = d.error; }
+    }
+  }
+};
+show(); if (tokens) history();
+</script></body></html>

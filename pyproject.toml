@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-civilization"
+version = "0.1.0"
+description = "AI Civilization - Brain & Memory, Telegram interface & orchestrator, Mini App backend (multi-tenant AI avatar SaaS)"
+requires-python = ">=3.11"
+dependencies = [
+    "sqlalchemy[asyncio]>=2.0.40,<2.1",   # 2.0 line only (2.1 exists, deliberately not used)
+    "asyncpg>=0.30",
+    "alembic>=1.16",                      # path_separator (Windows drive letters in prepend_sys_path) appeared in 1.16
+    "pgvector>=0.4",
+    "pydantic-settings>=2.6",
+    "celery[redis]>=5.4",                 # queue + Beat; Redis is the broker
+    "redis>=5",                           # the rate limiter's client (bot/ratelimit.py); already installed with celery[redis], listed because the bot imports it itself
+    "httpx[socks]>=0.27",                 # SOCKS5 for GEMINI_PROXY (google-genai talks through httpx)
+    "telethon>=1.40,<2",                  # the userbot that creates the person's group (bot/userbot.py); a user account, MTProto
+    "aiohttp-socks>=0.9",                 # SOCKS5 for TELEGRAM_PROXY (aiogram talks through aiohttp)
+    "google-genai>=1.0",                  # Gemini API: Judge, Garbage Collector, embeddings, chat, voice-note transcription (no other LLM vendor)
+    "aiogram>=3.13,<4",                   # Telegram Bot API, Long Polling (Module 2)
+    "tzdata>=2024.1",                     # zoneinfo has no tz database on Windows without it
+    "fastapi>=0.115",                     # Mini App backend, a separate process: ai_civ.web (Module 4)
+    "uvicorn>=0.30",
+    "python-docx>=1.1",                   # DOCX attachments are read into text (bot/attachments.py)
+    "trafilatura>=2.0",                   # clean text of a web page for the link summariser (bot/fetch.py)
+    "youtube-transcript-api>=1.2",        # subtitles of a YouTube video for the summariser (bot/fetch.py)
+    "python-dateutil>=2.9",              # RRULE validation / expansion of the schedule (web/recurrence.py)
+    "Pillow>=11",                         # avatar sanitising and WebP re-encoding (web/character.py)
+    "PyJWT>=2.8",                         # access tokens of the mobile app (web/deps_app.py)
+    "argon2-cffi>=23.1",                  # password hashes of the mobile app (web/app_auth_api.py)
+    "python-multipart>=0.0.9",            # multipart/form-data of POST /api/v1/mobile/chat/stream (voice / file upload)
+    "sse-starlette>=2.1",                 # Server-Sent Events of POST /api/v1/mobile/chat/stream (web/app_api.py)
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-ra"

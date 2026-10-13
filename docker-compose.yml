@@ -1,0 +1,159 @@
+# Production stack: postgres (pgvector) + redis + proxy (socat -> WARP) + bot + web + celery worker + celery beat.
+# Secrets live only in .env (never baked into the image). Values under `environment:` override .env, because
+# inside the compose network Redis is `redis`, not 127.0.0.1.
+#
+# Database: DATABASE_URL / MIGRATION_DATABASE_URL come from .env. To use the bundled `postgres` service point them at
+# host `postgres` (e.g. postgresql+asyncpg://ai_civ_app:...@postgres:5432/civ_db); with Supabase keep the Supabase URLs.
+
+x-app: &app
+  # One image for all four app services. It is BUILT only by `bot`: with several services building the same tag
+  # concurrently, `docker compose up --build` fails with 'image ai_civ:latest already exists'.
+  image: ai_civ:latest
+  pull_policy: never
+  env_file: .env
+  restart: unless-stopped
+  environment: &app-env
+    CELERY_BROKER_URL: redis://redis:6379/0
+    RATE_LIMIT_REDIS_URL: redis://redis:6379/0
+    # REMINDERS_REDIS_URL is unset on purpose: it falls back to the broker above. GEMINI_PROXY / TELEGRAM_PROXY come from .env
+    # (default in .env.example: socks5h://proxy:1080 - the `proxy` service below).
+    WEB_DIST_DIR: /app/web/dist
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    proxy:
+      condition: service_healthy
+    migrate:
+      condition: service_completed_successfully   # nothing starts on a database that is not migrated and logged in
+  networks: [internal]
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-civ_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # ports:                       # uncomment for admin access; bound to loopback on purpose
+    #   - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [internal]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [internal]
+
+  # One-shot bootstrap: alembic upgrade head (creates the runtime role ai_civ_app as NOLOGIN), then ALTER ROLE ... LOGIN PASSWORD from DATABASE_URL,
+  # then a check that RLS applies to that role. Idempotent; exits non-zero on any problem, and then bot / web / worker / beat do not start.
+  migrate:
+    image: ai_civ:latest
+    pull_policy: never
+    env_file: .env
+    environment:
+      ALEMBIC_DIR: /app
+    command: ["python", "-m", "ai_civ.cli.init_db"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [internal]
+
+  # Outbound SOCKS5 gateway for the bot, the workers and the web backend (GEMINI_PROXY / TELEGRAM_PROXY = socks5h://proxy:1080).
+  # `proxy` is the one stable address the application knows; WHERE the traffic leaves is decided here, in code, not by a hand-made socat unit:
+  #   * default: the `warp` container below (Cloudflare WARP, SOCKS5 on warp:1080) - nothing to install on the host;
+  #   * WARP already running on the HOST: set PROXY_UPSTREAM_HOST=host.docker.internal and PROXY_UPSTREAM_PORT=40000 in .env (warp-cli proxy mode
+  #     listens on loopback only on some versions - then it must be made reachable from the docker bridge, or just use the container).
+  proxy:
+    image: alpine/socat:latest
+    restart: unless-stopped
+    command: ["-d", "TCP-LISTEN:1080,fork,reuseaddr", "TCP:${PROXY_UPSTREAM_HOST:-warp}:${PROXY_UPSTREAM_PORT:-1080}"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "socat -u /dev/null TCP:127.0.0.1:1080 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [internal]
+
+  # Cloudflare WARP as a SOCKS5/HTTP proxy (image caomingjun/warp, https://github.com/cmj2002/warp-docker). Needs NET_ADMIN and the TUN
+  # device rule below; no published port: only `proxy` (and anything else on the internal network) reaches it.
+  warp:
+    image: caomingjun/warp
+    restart: unless-stopped
+    device_cgroup_rules:
+      - "c 10:200 rwm"
+    cap_add: [MKNOD, AUDIT_WRITE, NET_ADMIN]
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: 0
+      net.ipv4.conf.all.src_valid_mark: 1
+    environment:
+      WARP_SLEEP: "2"
+      # WARP_LICENSE_KEY: ${WARP_LICENSE_KEY:-}   # optional (WARP+)
+    volumes:
+      - warp_data:/var/lib/cloudflare-warp
+    networks: [internal]
+
+  bot:
+    <<: *app
+    build: .
+    command: ["python", "-m", "ai_civ.bot"]
+
+  web:
+    <<: *app
+    command: ["python", "-m", "ai_civ.web"]
+    environment:
+      <<: *app-env
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: "8000"
+    # Loopback only: put a TLS reverse proxy / tunnel in front (Telegram requires HTTPS for Mini Apps).
+    # Use "8000:8000" to publish on every interface.
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    <<: *app
+    command: ["celery", "-A", "ai_civ.celery_app", "worker", "--loglevel=info", "-Q", "celery", "--concurrency=${CELERY_CONCURRENCY:-2}"]
+
+  # The userbot: creates the person's private forum group on /start (TELEGRAM_API_ID / TELEGRAM_API_HASH / TELEGRAM_USERBOT_SESSION in .env; without them
+  # the bot never queues anything and this worker idles). Its own queue and EXACTLY one process: the same session in two places at once is revoked by Telegram.
+  userbot:
+    <<: *app
+    command: ["celery", "-A", "ai_civ.celery_app", "worker", "--loglevel=info", "-Q", "userbot", "--concurrency=1", "-n", "userbot@%h"]
+
+  beat:
+    <<: *app
+    # Schedule state is disposable: every periodic task is idempotent and recomputed from the database.
+    command: ["celery", "-A", "ai_civ.celery_app", "beat", "--loglevel=info", "-s", "/tmp/celerybeat-schedule"]
+
+networks:
+  internal:
+
+volumes:
+  postgres_data:
+  redis_data:
+  warp_data:
