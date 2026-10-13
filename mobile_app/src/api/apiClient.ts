@@ -1,4 +1,5 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios';
+import { fetch as expoFetch, type FetchRequestInit } from 'expo/fetch';
 
 import { API_URL, API_URL_CONFIGURED, AUTH_PREFIX } from './config';
 import { tokenStorage } from './tokenStorage';
@@ -24,7 +25,7 @@ export function setSessionExpiredHandler(handler: (() => void) | null): void {
   onSessionExpired = handler;
 }
 
-class SessionExpiredError extends Error {
+export class SessionExpiredError extends Error {
   constructor() {
     super('Session expired');
     this.name = 'SessionExpiredError';
@@ -74,6 +75,17 @@ async function expireSession(): Promise<void> {
   onSessionExpired?.();
 }
 
+/**
+ * A token to retry with after a request sent with `sentToken` got a 401. If a parallel request already
+ * refreshed while this one was in flight, the stored token differs and is simply reused.
+ * Throws SessionExpiredError when the session is dead (the app has been signed out), or the network error.
+ */
+async function freshAccessToken(sentToken: string | null): Promise<string> {
+  const stored = await tokenStorage.getAccess();
+  if (stored && stored !== sentToken) return stored;
+  return refreshAccessToken();
+}
+
 // ------------------------------------------------------------------ interceptors
 
 type RetriableConfig = InternalAxiosRequestConfig & { _retried?: boolean };
@@ -93,10 +105,8 @@ api.interceptors.response.use(
     original._retried = true; // one retry per request, never a loop
 
     try {
-      // If a parallel request already refreshed while this one was in flight, just reuse the new token.
       const sent = String(original.headers.get('Authorization') ?? '').replace(/^Bearer /, '');
-      const stored = await tokenStorage.getAccess();
-      const token = stored && stored !== sent ? stored : await refreshAccessToken();
+      const token = await freshAccessToken(sent || null);
       original.headers.set('Authorization', `Bearer ${token}`);
     } catch (refreshError) {
       if (refreshError instanceof SessionExpiredError) throw error; // caller sees the original 401; the app is already signed out
@@ -105,6 +115,35 @@ api.interceptors.response.use(
     return api(original);
   },
 );
+
+// ------------------------------------------------------------------ streaming fetch
+
+/**
+ * fetch() with the same session handling as `api`: Bearer from SecureStore, and on 401 one transparent
+ * refresh + one retry. Needed because axios cannot read a response body as it arrives (SSE).
+ * Retrying a POST is safe for the chat: the server de-duplicates by client_message_id.
+ * If the session is dead the original 401 response is returned (the app is already signed out).
+ */
+export async function authorizedFetch(path: string, init: FetchRequestInit = {}): Promise<Response> {
+  const send = (token: string | null) =>
+    expoFetch(`${API_URL}${path}`, {
+      ...init,
+      headers: { ...(init.headers as Record<string, string> | undefined), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    });
+
+  const firstToken = await tokenStorage.getAccess();
+  const first = await send(firstToken);
+  if (first.status !== 401) return first;
+
+  let token: string;
+  try {
+    token = await freshAccessToken(firstToken);
+  } catch (error) {
+    if (error instanceof SessionExpiredError) return first;
+    throw error;
+  }
+  return send(token);
+}
 
 // ------------------------------------------------------------------ error text for the UI
 

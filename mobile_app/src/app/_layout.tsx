@@ -11,7 +11,7 @@ SplashScreen.preventAutoHideAsync();
 
 const theme = {
   ...DarkTheme,
-  colors: { ...DarkTheme.colors, background: '#0a0a0a', card: '#0a0a0a', primary: '#818cf8' },
+  colors: { ...DarkTheme.colors, background: '#020617', card: '#020617', primary: '#818cf8' },
 };
 
 function RootNavigator() {

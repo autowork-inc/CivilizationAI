@@ -1,8 +1,10 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Link } from 'expo-router';
-import { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { useRef, useState } from 'react';
+import { Pressable, Text, TextInput, View } from 'react-native';
 
 import { getErrorMessage } from '@/api/apiClient';
+import { AuthHeader } from '@/components/AuthHeader';
 import { Button } from '@/components/Button';
 import { Screen } from '@/components/Screen';
 import { TextField } from '@/components/TextField';
@@ -12,6 +14,7 @@ const PASSWORD_MIN = 8; // same as the backend
 
 export default function RegisterScreen() {
   const { register } = useAuth();
+  const passwordRef = useRef<TextInput>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -38,10 +41,7 @@ export default function RegisterScreen() {
 
   return (
     <Screen>
-      <View className="mb-10">
-        <Text className="text-3xl font-bold text-neutral-50">Создать аккаунт</Text>
-        <Text className="mt-2 text-base text-neutral-400">Почта и пароль — этого достаточно, чтобы начать.</Text>
-      </View>
+      <AuthHeader title="Создать аккаунт" subtitle="Почта и пароль — этого достаточно, чтобы начать." />
 
       <TextField
         label="Email"
@@ -52,8 +52,11 @@ export default function RegisterScreen() {
         textContentType="emailAddress"
         autoComplete="email"
         returnKeyType="next"
+        blurOnSubmit={false}
+        onSubmitEditing={() => passwordRef.current?.focus()}
       />
       <TextField
+        ref={passwordRef}
         label="Пароль"
         value={password}
         onChangeText={setPassword}
@@ -65,14 +68,21 @@ export default function RegisterScreen() {
         onSubmitEditing={submit}
       />
 
-      {error ? <Text className="mb-4 text-sm text-red-400">{error}</Text> : null}
+      {error ? (
+        <View className="mb-4 flex-row items-center rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3">
+          <Ionicons name="alert-circle" size={18} color="#f87171" />
+          <Text className="ml-2 flex-1 text-sm text-red-300">{error}</Text>
+        </View>
+      ) : null}
 
-      <Button title="Создать аккаунт" onPress={submit} loading={busy} />
+      <View className="mt-2">
+        <Button title="Создать аккаунт" onPress={submit} loading={busy} />
+      </View>
 
       <Link href="/login" asChild>
         <Pressable className="mt-6 items-center py-2" hitSlop={8}>
-          <Text className="text-base text-neutral-400">
-            Уже есть аккаунт? <Text className="font-semibold text-indigo-400">Войти</Text>
+          <Text className="text-base text-slate-400">
+            Уже есть аккаунт? <Text className="font-semibold text-blue-400">Войти</Text>
           </Text>
         </Pressable>
       </Link>

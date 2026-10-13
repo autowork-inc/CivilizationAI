@@ -17,8 +17,8 @@ export function Button({ title, onPress, loading = false, disabled = false, vari
       disabled={inactive}
       accessibilityRole="button"
       accessibilityState={{ disabled: inactive, busy: loading }}
-      className={`h-14 items-center justify-center rounded-xl active:opacity-80 ${
-        primary ? 'bg-indigo-500' : 'border border-neutral-700 bg-neutral-900'
+      className={`h-14 w-full items-center justify-center rounded-2xl active:scale-[0.98] ${
+        primary ? 'bg-blue-600 active:bg-blue-700' : 'border border-slate-700 bg-slate-800 active:bg-slate-700'
       } ${inactive ? 'opacity-60' : ''}`}>
       {loading ? <ActivityIndicator color="#ffffff" /> : <Text className="text-base font-semibold text-white">{title}</Text>}
     </Pressable>
